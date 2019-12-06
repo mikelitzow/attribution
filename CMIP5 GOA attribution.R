@@ -28,6 +28,14 @@ ggplot(dat, aes(Year, anomaly, color=model)) +
   geom_line() + 
   facet_wrap(~Era, scales="free_x")
 
+preindustrial <- dat %>%
+  filter(Era=="preindustrial")
+
+ggplot(preindustrial, aes(anomaly, fill=model)) +
+  theme_bw() +
+  geom_density(alpha=0.3) +
+  xlim(-5,5)
+
 
 # We will compare the preindustrial estimates above with ERSSTv5 observations. The observations are for the same area (50º-60ºN, 150º-130ºW). Here is average SST for that area from ERSSTv5:
 
@@ -73,14 +81,42 @@ image(x,y,z, col=tim.colors(64), xlim=c(190,240), ylim=c(40,66))
 contour(x, y, z, add=T) 
 map('world2Hires',fill=F,xlim=c(130,250), ylim=c(20,66),add=T, lwd=2)
 
+# get anomaly wrt 1981:2010 mean (1900:2016 SD)
 yr <- as.numeric(as.character(years(d)))
 m <- months(d)
+
+f <- function(x) tapply(x, yr, mean)
+
+annual.sst <- apply(SST, 2, f) # annual mean for each cell
+
+# get anomaly for each cell
+mu <- apply(annual.sst[rownames(annual.sst) %in% 1981:2010,], 2, mean)	# Compute monthly means for each cell during 1981:2010
+
+# change suggested by Nick Bond - using SD for the 1900:2016 time series when calculating anomalies
+# doing this b.c my previous anomalies appear to be too large when compared with Walsh et al. 2018
+sd <- apply(annual.sst[rownames(annual.sst) %in% 1900:2016,], 2, sd)
+
+mu <- matrix(mu, nrow=nrow(annual.sst), ncol=length(mu), byrow=T)
+sd <- matrix(sd, nrow=nrow(annual.sst), ncol=length(sd), byrow=T) 
+
+anom <- (annual.sst - mu)/sd # now each value is a cell-specific normalized anomaly relative to 1981-2010 
+
 weights <-  sqrt(cos(lat*pi/180))
-ff <- function(x) weighted.mean(x, w=weights, na.rm=T)
-weighted.mean <- apply(SST, 1, ff)
+f <- function(x) weighted.mean(x, w=weights, na.rm=T)
+annual.anomaly <- apply(anom, 1, f)
 
-annual.sst <- tapply(weighted.mean, yr, mean)
+annual.anomaly <- annual.anomaly[names(annual.anomaly) >=1900]
 
+anomaly.plot <- data.frame(year=1900:2018, anomaly=annual.anomaly[names(annual.anomaly) %in% 1900:2018],
+                           sign=ifelse(annual.anomaly[names(annual.anomaly) %in% 1900:2018]>0, "positive", "negative"))
+anomaly.plot$sign <- reorder(anomaly.plot$sign, desc(anomaly.plot$sign))
+ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
+  theme_bw() +
+  geom_col() +
+  theme(legend.position='none')
+
+##################
+# now estimate 2019 value
 # limit all years to the range of months available in this year!
 m <- as.numeric(m)
 keep <- m <= as.numeric(month) # this is the most recent month specified for data query above
@@ -92,175 +128,46 @@ short.sst <- tapply(short.weighted.mean, yr[keep], mean)
 
 # interesting, looks a little curved...
 x <- as.vector(short.sst[names(short.sst) %in% 1900:2018])
-y <- annual.sst[names(annual.sst) %in% 1900:2018]
+y <- annual.anomaly[names(annual.anomaly) %in% 1900:2018]
 
-plot(x,y)
+plot(1900:2018, scale(x), col="blue", type="l")
+lines(1900:2018, scale(y), col='red')
 
 md1 <- lm(y ~ x)
 
 # now add 2019 estimate to the annual TS
 estimated.2019 <- short.sst[names(short.sst)==2019]*coef(md1)[2] + coef(md1)[1]
-annual.sst[names(annual.sst)==2019] <- estimated.2019
-names(annual.sst) <- 1854:2019
+annual.anomaly[names(annual.anomaly)==2019] <- estimated.2019
 
-plot(1854:2019, annual.sst, type="l")
+anomaly.plot <- data.frame(year=1900:2019, anomaly=annual.anomaly,
+                           sign=as.vector(ifelse(annual.anomaly>0, "positive", "negative")),
+                           sm.anom=rollmean(anomaly.plot$anomaly, 3, fill = NA))
 
-# and plot...
-annual <- data.frame(year=names(annual.sst), anomaly=annual.sst, 
-                     anomaly3=zoo::rollmean(annual.sst, 3, fill=NA))
-annual$year <- as.numeric(as.character(annual$year))
+#anomaly.plot$sign <- reorder(anomaly.plot$sign, desc(anomaly.plot$sign))
 
+library(zoo)
+anomaly.plot$sm.anom <- rollmean(anomaly.plot$anomaly, 3, fill = NA)
 
+plot1 <- ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
+  theme_bw() +
+  geom_col() +
+  theme(legend.position='none')
 
-
-Now going ahead with the comparison to preindustrial simulations.
-
-I'm doing this in *two ways*.
-
-First way ("debiasing"):
+anomaly.plot <- data.frame(year=1900:2019, anomaly=annual.anomaly,
+                           sm.anom = rollmean(anomaly.plot$anomaly, 3, fill = NA))
   
-  1. Average annual anomalies for the historical period (1987-2005) for each model.
-2. Subract the mean anomaly from the ERSSTv5 version above to calculate the "bias" for each model, i.e., bias = model.mean - observed.mean
-3. Preindustrial simulations are then adjusted with this bias value, i.e.: "debiased" value = simulation anomaly - bias.
+plot2 <- plot1 +
+  geom_path(aes(year, sm.anom))
 
-```{r}
-# now compare thes observations with each model!
-compare.dat <- dat %>%
-  filter(Era=="historical / RCP8.5", Year <=2005) %>%
-  mutate(observed=rep(annual.anomaly[names(annual.anomaly) %in% 1987:2005],5))
+# Now going ahead with the comparison to preindustrial simulations.
 
-model.means <- tapply(compare.dat$anomaly, compare.dat$model, mean)
-observed.mean <- mean(annual.anomaly[names(annual.anomaly) %in% 1987:2005])
-
-bias <- model.means - observed.mean 
-
-# so...we subtract this bias from each model's preindustrial simulations
-# to calculate unbiased estimates of preindustrial distributions for comparison with observations
-
-envelope <- dat %>%
-  filter(Era=="preindustrial") %>%
-  mutate(debiased=anomaly-bias[match(model, names(bias))])
-
-envelope$debiased.3.yr <- NA
-
-mods <- unique(envelope$model)
-
-for(i in 1:length(mods)){
-  # i <- 1
-  temp <- envelope %>%
-    filter(model==mods[i])
-  
-  envelope$debiased.3.yr[envelope$model==mods[i]] <- zoo::rollmean(temp$debiased, 3, fill=NA)
-  
-  envelope$anomaly.3.yr[envelope$model==mods[i]] <- zoo::rollmean(temp$anomaly, 3, fill=NA)
-}
-
-fmin <- function(x) min(x, na.rm=T)
-fmax <- function(x) max(x, na.rm=T)
-
-ranges <- data.frame(min.anomaly=fmin(envelope$anomaly),
-                     max.anomaly=fmax(envelope$anomaly),
-                     min.anomaly3=fmin(envelope$anomaly.3.yr),
-                     max.anomaly3=fmax(envelope$anomaly.3.yr),
-                     min.debiased=fmin(envelope$debiased),
-                     max.debiased=fmax(envelope$debiased),
-                     min.debiased3=fmin(envelope$debiased.3.yr),
-                     max.debiased3=fmax(envelope$debiased.3.yr))
-```
-
-The mean historical values for each model:
-  
-  ```{r}
-model.means
-```
-
-And the mean ERSSTv5 anomaly for the same period:
-  
-  ```{r}
-observed.mean
-```
-
-Which gives us the following bias values:
-  
-  ```{r}
-bias
-```
-
-\pagebreak
-
-I then calculate the envelope of estimated preindustrial values as the range of debiased anomaly values for all five models. 
-
-I also calculate three-year running mean anomaly values for each model and plot the range of these. The idea here is to evaluate the likelihood of a multi-year anomaly under preindustrial conditions. *This step rests on the assumption that the 60 year periods from the model simulation were selected as a block, and therefore include the autocorrelation values from the original.*
-  
-  Here's the resulting plot. Annual observations in black, 3-year running means in blue, envelope of annual preindustrial values in grey shade, envelope of 3-year preindustrial means in blue shade. (2019 estimated from data through August)
-
-```{r, fig.height=3, warning=F}
-
-# set pallette
-cb <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
-
-ggplot(filter(annual, year >= 1950), aes(year, anomaly)) +
+# plot preindustrial distributions with recent
+ggplot(preindustrial, aes(anomaly, fill=model)) +
 theme_bw() +
-geom_line() +
-geom_point() +
-geom_line(aes(year, anomaly3), color=cb[3]) +
-geom_ribbon(aes(ymin=ranges$min.debiased, ymax=ranges$max.debiased), alpha=0.2) +
-geom_ribbon(aes(ymin=ranges$min.debiased3, ymax=ranges$max.debiased3), alpha=0.2, fill=cb[3]) +
-theme(axis.title.x = element_blank()) +
-ylab("SST anomaly") +
-ggtitle("Observations v. debiased envelope")
+  geom_density(alpha=0.3) +
+  xlim(-5,5) +
+  geom_vline(xintercept = annual.anomaly[names(annual.anomaly) %in% 2016:2019], lty=2)
 
-```
-
-And here is the same plot, using the actual preindustrial envelope, without the debiasing described above. 
-```{r, fig.height=3, warning=F}
-# compare with non-debiased estimates...
-ggplot(annual, aes(year, anomaly)) +
-theme_bw() +
-geom_line() +
-geom_point() +
-geom_line(aes(year, anomaly3), color=cb[3]) +
-geom_ribbon(aes(ymin=ranges$min.anomaly, ymax=ranges$max.anomaly), alpha=0.2) +
-geom_ribbon(aes(ymin=ranges$min.anomaly3, ymax=ranges$max.anomaly3), alpha=0.2, fill=cb[3]) +
-theme(axis.title.x = element_blank()) +
-ylab("SST anomaly") +
-ggtitle("Observations v. raw envelope")
-
-<<<<<<< HEAD
-# and save a png version
-plot <- ggplot(filter(annual, year >= 1900), aes(year, anomaly)) +
-=======
-# export without title
-xtra <- data.frame(year=1880:2040, 
-min.anomaly=ranges$min.anomaly,
-max.anomaly=ranges$max.anomaly,
-min.anomaly3=ranges$min.anomaly3,
-max.anomaly3=ranges$max.anomaly3)
-
-annual <- left_join(xtra, annual)
-
-save.plot <- ggplot(annual, aes(year, anomaly)) +
->>>>>>> 51c4ed52122777e59d1ad48d9485bd49b8e2976e
-theme_bw() +
-geom_line() +
-geom_point() +
-geom_line(aes(year, anomaly3), color=cb[3]) +
-<<<<<<< HEAD
-geom_ribbon(aes(ymin=ranges$min.anomaly, ymax=ranges$max.anomaly), alpha=0.2) +
-geom_ribbon(aes(ymin=ranges$min.anomaly3, ymax=ranges$max.anomaly3), alpha=0.2, fill=cb[3]) +
-theme(axis.title.x = element_blank()) +
-ylab("SST anomaly")
-ggsave(plot=plot, "goa sst observations and raw envelope.png", width=6, height=4, units="in")
-=======
-geom_ribbon(aes(ymin=annual$min.anomaly, ymax=annual$max.anomaly), alpha=0.2) +
-geom_ribbon(aes(ymin=annual$min.anomaly3, ymax=annual$max.anomaly3), alpha=0.2, fill=cb[3]) +
-scale_x_continuous(breaks=seq(1900, 2020, 20), limits = c(1900,2020)) +
-theme(axis.title.x = element_blank()) +
-ylab("SST anomaly") 
-
-ggsave(plot=save.plot, device="png", "GOA sst vs. raw observations.png", width=6, height=3, units="in")
->>>>>>> 51c4ed52122777e59d1ad48d9485bd49b8e2976e
-```
 
 Conclusion: the debiasing is more conservative, presumably because it removes internal variability in the recent observations that is not captured by the preindustrial simulations. The raw envelope produces a conclusion more similar to Walsh et al., with a single year outside the envelope of preindustrial conditions.
 
