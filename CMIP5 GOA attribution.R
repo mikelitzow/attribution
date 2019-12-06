@@ -27,24 +27,24 @@ ggplot(dat, aes(Year, anomaly, color=model)) +
   theme_bw() +
   geom_line() + 
   facet_wrap(~Era, scales="free_x")
-```
 
-We will compare the preindustrial estimates above with ERSSTv5 observations. The observations are for the same area (50º-60ºN, 150º-130ºW). Here is average SST for that area from ERSSTv5:
-  
-  ```{r, message=F, fig.width=5, fig.height=4}
+
+# We will compare the preindustrial estimates above with ERSSTv5 observations. The observations are for the same area (50º-60ºN, 150º-130ºW). Here is average SST for that area from ERSSTv5:
+
+# quickly (!) estimate 2019 annual anomaly based on data avaliable so far!
 # identify latest year and month needed
-year <- 2018
-month <- "12"
+year <- 2019
+month <- "10"
 
-URL <- paste("https://coastwatch.pfeg.noaa.gov/erddap/griddap/nceiErsstv4.nc?sst[(1854-01-01):1:(", year, "-", month, "-01T00:00:00Z)][(0.0):1:(0.0)][(50):1:(60)][(210):1:(230)]", sep="")
+URL <- paste("https://coastwatch.pfeg.noaa.gov/erddap/griddap/nceiErsstv5.nc?sst[(1854-01-01):1:(", year, "-", month, "-01T00:00:00Z)][(0.0):1:(0.0)][(50):1:(60)][(210):1:(230)]", sep="")
 
-download.file(URL, "GOA.box.ersst")
+download.file(URL, "GOA.box.ersst.latest")
 
 # process
-nc <- nc_open("GOA.box.ersst")
+nc <- nc_open("GOA.box.ersst.latest")
 
 # extract dates
-raw <- ncvar_get(nc, "time") # seconds since 1-1-1970
+raw <- ncvar_get(nc, "time")
 h <- raw/(24*60*60)
 d <- dates(h, origin = c(1,1,1970))
 
@@ -73,53 +73,45 @@ image(x,y,z, col=tim.colors(64), xlim=c(190,240), ylim=c(40,66))
 contour(x, y, z, add=T) 
 map('world2Hires',fill=F,xlim=c(130,250), ylim=c(20,66),add=T, lwd=2)
 
-```
-
-\pagebreak
-
-And here are the annual anonamlies wrt 1981-2010. Just to make sure that I'm not making any errors, I'll outline the steps I'm using:
-
-1. Calculate annual mean SST for each cell.
-2. Change these into anomalies: subtract 1981-2010 mean, divide by 1900-2018 sd.
-2. Calculate annual mean anomaly for the entire box, weighting each cell by its area.
-
-The resulting time series looks like this:
-
-```{r, fig.height=3}
-# get anomaly for 1981:2010
 yr <- as.numeric(as.character(years(d)))
 m <- months(d)
-
-f <- function(x) tapply(x, yr, mean)
-
-annual.sst <- apply(SST, 2, f) # annual mean for each cell
-
-# get anomaly for each cell
-mu <- apply(annual.sst[rownames(annual.sst) %in% 1981:2010,], 2, mean)	# Compute monthly means for each cell during 1981:2010
-
-# change suggested by Nick Bond - using SD for the entire time series when calculating anomalies
-# doing this b.c my previous anomalies appear to be too large when compared with Walsh et al. 2018
-sd <- apply(annual.sst[rownames(annual.sst) >= 1900,], 2, sd)
-
-mu <- matrix(mu, nrow=nrow(annual.sst), ncol=length(mu), byrow=T)
-sd <- matrix(sd, nrow=nrow(annual.sst), ncol=length(sd), byrow=T) 
-
-anom <- (annual.sst - mu)/sd # now each value is a cell-specific normalized anomaly relative to 1981-2010 
-
 weights <-  sqrt(cos(lat*pi/180))
-f <- function(x) weighted.mean(x, w=weights, na.rm=T)
-annual.anomaly <- apply(anom, 1, f)
+ff <- function(x) weighted.mean(x, w=weights, na.rm=T)
+weighted.mean <- apply(SST, 1, ff)
 
-annual.anomaly <- annual.anomaly[names(annual.anomaly) >=1900]
+annual.sst <- tapply(weighted.mean, yr, mean)
 
-anomaly.plot <- data.frame(year=1900:2018, anomaly=annual.anomaly, sign=ifelse(annual.anomaly>0, "positive", "negative"))
-anomaly.plot$sign <- reorder(anomaly.plot$sign, desc(anomaly.plot$sign))
-ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
-theme_bw() +
-geom_col() +
-theme(legend.position='none')
+# limit all years to the range of months available in this year!
+m <- as.numeric(m)
+keep <- m <= as.numeric(month) # this is the most recent month specified for data query above
 
-```
+short.sst <- SST[keep,]
+short.weighted.mean <- apply(short.sst, 1, ff)
+
+short.sst <- tapply(short.weighted.mean, yr[keep], mean)
+
+# interesting, looks a little curved...
+x <- as.vector(short.sst[names(short.sst) %in% 1900:2018])
+y <- annual.sst[names(annual.sst) %in% 1900:2018]
+
+plot(x,y)
+
+md1 <- lm(y ~ x)
+
+# now add 2019 estimate to the annual TS
+estimated.2019 <- short.sst[names(short.sst)==2019]*coef(md1)[2] + coef(md1)[1]
+annual.sst[names(annual.sst)==2019] <- estimated.2019
+names(annual.sst) <- 1854:2019
+
+plot(1854:2019, annual.sst, type="l")
+
+# and plot...
+annual <- data.frame(year=names(annual.sst), anomaly=annual.sst, 
+                     anomaly3=zoo::rollmean(annual.sst, 3, fill=NA))
+annual$year <- as.numeric(as.character(annual$year))
+
+
+
 
 Now going ahead with the comparison to preindustrial simulations.
 
@@ -203,72 +195,6 @@ I also calculate three-year running mean anomaly values for each model and plot 
   Here's the resulting plot. Annual observations in black, 3-year running means in blue, envelope of annual preindustrial values in grey shade, envelope of 3-year preindustrial means in blue shade. (2019 estimated from data through August)
 
 ```{r, fig.height=3, warning=F}
-# quickly (!) estimate 2019 annual anomaly based on data avaliable so far!
-# identify latest year and month needed
-year <- 2019
-month <- "8"
-
-URL <- paste("https://coastwatch.pfeg.noaa.gov/erddap/griddap/nceiErsstv5.nc?sst[(1854-01-01):1:(", year, "-", month, "-01T00:00:00Z)][(0.0):1:(0.0)][(50):1:(60)][(210):1:(230)]", sep="")
-
-# download.file(URL, "GOA.box.ersst.latest")
-
-# process
-nc <- nc_open("GOA.box.ersst.latest")
-
-# extract dates
-raw <- ncvar_get(nc, "time")
-h <- raw/(24*60*60)
-d <- dates(h, origin = c(1,1,1970))
-
-# extract study area
-x <- ncvar_get(nc, "longitude")
-y <- ncvar_get(nc, "latitude")
-
-SST <- ncvar_get(nc, "sst", verbose = F)
-
-# Change data from a 3-D array to a matrix of monthly data by grid point:
-# First, reverse order of dimensions ("transpose" array)
-SST <- aperm(SST, 3:1)  
-
-# Change to matrix with column for each grid point, rows for monthly means
-SST <- matrix(SST, nrow=dim(SST)[1], ncol=prod(dim(SST)[2:3]))  
-
-# Keep track of corresponding latitudes and longitudes of each column:
-lat <- rep(y, length(x))   
-lon <- rep(x, each = length(y))   
-dimnames(SST) <- list(as.character(d), paste("N", lat, "E", lon, sep=""))
-
-yr <- as.numeric(as.character(years(d)))
-m <- months(d)
-weights <-  sqrt(cos(lat*pi/180))
-ff <- function(x) weighted.mean(x, w=weights, na.rm=T)
-weighted.mean <- apply(SST, 1, ff)
-
-annual.sst <- tapply(weighted.mean, yr, mean)
-
-# limit all years to the range of months available in this year!
-m <- as.numeric(m)
-keep <- m <= as.numeric(month) # this is the most recent month specified for data query above
-
-short.sst <- SST[keep,]
-short.weighted.mean <- apply(short.sst, 1, ff)
-
-short.sst <- tapply(short.weighted.mean, yr[keep], mean)
-
-# interesting, looks a little curved...
-x <- as.vector(short.sst[names(short.sst) %in% 1900:2018])
-y <- annual.anomaly
-md1 <- lm(y ~ x)
-
-# now add 2019 estimate to the annual anoamly TS
-estimated.2019 <- short.sst[names(short.sst)==2019]*coef(md1)[2] + coef(md1)[1]
-annual.anomaly <- c(annual.anomaly, estimated.2019)
-names(annual.anomaly) <- 1900:2019
-
-# and plot...
-annual <- data.frame(year=names(annual.anomaly), anomaly=annual.anomaly, 
-anomaly3=zoo::rollmean(annual.anomaly, 3, fill=NA))
-annual$year <- as.numeric(as.character(annual$year))
 
 # set pallette
 cb <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
