@@ -4,6 +4,7 @@ library(maps)
 library(mapdata)
 library(fields)
 library(chron)
+library(zoo)
 
 # 
 # This comparison uses output from 5 CMIP5 models that were used in the attribution study published in Walsh et al. 2018 BAMS. 
@@ -35,6 +36,17 @@ ggplot(preindustrial, aes(anomaly, fill=model)) +
   theme_bw() +
   geom_density(alpha=0.3) +
   xlim(-5,5)
+
+# and group them all
+ggplot(preindustrial, aes(anomaly)) +
+  theme_bw() +
+  geom_density(alpha=0.3) +
+  xlim(-5,5)
+
+# and...run the three-year rolling means on preindustrial simulations and plot that distribution
+preindustrial$sm.anomaly <- NA
+
+
 
 
 # We will compare the preindustrial estimates above with ERSSTv5 observations. The observations are for the same area (50º-60ºN, 150º-130ºW). Here is average SST for that area from ERSSTv5:
@@ -143,9 +155,9 @@ anomaly.plot <- data.frame(year=1900:2019, anomaly=annual.anomaly,
                            sign=as.vector(ifelse(annual.anomaly>0, "positive", "negative")),
                            sm.anom=rollmean(anomaly.plot$anomaly, 3, fill = NA))
 
-#anomaly.plot$sign <- reorder(anomaly.plot$sign, desc(anomaly.plot$sign))
+anomaly.plot$sign <- reorder(anomaly.plot$sign, desc(anomaly.plot$sign))
 
-library(zoo)
+
 anomaly.plot$sm.anom <- rollmean(anomaly.plot$anomaly, 3, fill = NA)
 
 plot1 <- ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
