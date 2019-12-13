@@ -5,6 +5,7 @@ library(mapdata)
 library(fields)
 library(chron)
 library(zoo)
+library(ggpubr)
 
 # 
 # This comparison uses output from 5 CMIP5 models that were used in the attribution study published in Walsh et al. 2018 BAMS. 
@@ -37,24 +38,12 @@ ggplot(preindustrial, aes(anomaly, fill=model)) +
   geom_density(alpha=0.3) +
   xlim(-5,5)
 
-# and group them all
-ggplot(preindustrial, aes(anomaly)) +
-  theme_bw() +
-  geom_density(alpha=0.3) +
-  xlim(-5,5)
-
-# and...run the three-year rolling means on preindustrial simulations and plot that distribution
-preindustrial$sm.anomaly <- NA
-
-
-
-
 # We will compare the preindustrial estimates above with ERSSTv5 observations. The observations are for the same area (50º-60ºN, 150º-130ºW). Here is average SST for that area from ERSSTv5:
 
 # quickly (!) estimate 2019 annual anomaly based on data avaliable so far!
 # identify latest year and month needed
 year <- 2019
-month <- "10"
+month <- "11"
 
 URL <- paste("https://coastwatch.pfeg.noaa.gov/erddap/griddap/nceiErsstv5.nc?sst[(1854-01-01):1:(", year, "-", month, "-01T00:00:00Z)][(0.0):1:(0.0)][(50):1:(60)][(210):1:(230)]", sep="")
 
@@ -122,10 +111,6 @@ annual.anomaly <- annual.anomaly[names(annual.anomaly) >=1900]
 anomaly.plot <- data.frame(year=1900:2018, anomaly=annual.anomaly[names(annual.anomaly) %in% 1900:2018],
                            sign=ifelse(annual.anomaly[names(annual.anomaly) %in% 1900:2018]>0, "positive", "negative"))
 anomaly.plot$sign <- reorder(anomaly.plot$sign, desc(anomaly.plot$sign))
-ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
-  theme_bw() +
-  geom_col() +
-  theme(legend.position='none')
 
 ##################
 # now estimate 2019 value
@@ -138,7 +123,6 @@ short.weighted.mean <- apply(short.sst, 1, ff)
 
 short.sst <- tapply(short.weighted.mean, yr[keep], mean)
 
-# interesting, looks a little curved...
 x <- as.vector(short.sst[names(short.sst) %in% 1900:2018])
 y <- annual.anomaly[names(annual.anomaly) %in% 1900:2018]
 
@@ -153,187 +137,145 @@ annual.anomaly[names(annual.anomaly)==2019] <- estimated.2019
 
 anomaly.plot <- data.frame(year=1900:2019, anomaly=annual.anomaly,
                            sign=as.vector(ifelse(annual.anomaly>0, "positive", "negative")),
-                           sm.anom=rollmean(anomaly.plot$anomaly, 3, fill = NA))
+                           sm.anom=rollmean(annual.anomaly, 3, fill = NA))
 
 anomaly.plot$sign <- reorder(anomaly.plot$sign, desc(anomaly.plot$sign))
 
-
-anomaly.plot$sm.anom <- rollmean(anomaly.plot$anomaly, 3, fill = NA)
-
-plot1 <- ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
+ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
   theme_bw() +
   geom_col() +
+  geom_line(aes(year, sm.anom, group=1)) +
   theme(legend.position='none')
 
-anomaly.plot <- data.frame(year=1900:2019, anomaly=annual.anomaly,
-                           sm.anom = rollmean(anomaly.plot$anomaly, 3, fill = NA))
-  
-plot2 <- plot1 +
-  geom_path(aes(year, sm.anom))
-
-# Now going ahead with the comparison to preindustrial simulations.
+# Now going ahead with the comparison to preindustrial simulations
+preind.obs <- rbind(preindustrial,
+                    data.frame(Year=2014:2019, 
+                               Era="observation",
+                               model=NA, 
+                               anomaly=annual.anomaly[names(annual.anomaly) %in% 2014:2019]))
 
 # plot preindustrial distributions with recent
-ggplot(preindustrial, aes(anomaly, fill=model)) +
+ggplot(preind.obs, aes(anomaly, fill=Era)) +
 theme_bw() +
-  geom_density(alpha=0.3) +
-  xlim(-5,5) +
-  geom_vline(xintercept = annual.anomaly[names(annual.anomaly) %in% 2016:2019], lty=2)
+  geom_density(alpha=0.3, color="grey") +
+  xlim(-5,5) 
 
+points <- data.frame(labels=c(NA, NA, NA, "2017", "2018", "2014, 2015, 2016, 2019"), 
+                     anomaly=annual.anomaly[names(annual.anomaly) %in% 2014:2019],
+                     density=0)
 
-Conclusion: the debiasing is more conservative, presumably because it removes internal variability in the recent observations that is not captured by the preindustrial simulations. The raw envelope produces a conclusion more similar to Walsh et al., with a single year outside the envelope of preindustrial conditions.
+# and...run the three-year rolling means on preindustrial simulations and plot that distribution
 
-Just to confirm that my treatment of three-year rolling means is appropriate, I'll calculate AR(1) values of each preindustrial simulation. Here are the model AR(1) values for 1987-2005:
-  
-  ```{r}
+# now...figure out AR(1) values
 
 f <- function(x) ar(x, aic=F, order.max = 1)$ar
 
-model.ar.1 <- tapply(compare.dat$anomaly, compare.dat$model, f)
+model.ar.1 <- tapply(preindustrial$anomaly, preindustrial$model, f)
 
-observed.ar.1 <- f(annual.anomaly[names(annual.anomaly) %in% 1987:2005])
+observed.ar.1 <- f(annual.anomaly)
 
-model.ar.1
-```
+model.ar.1; observed.ar.1
 
-And the observed AR(1):
+# drop CCSM4 as autocorrelation is unreasonably low!
+smooth.preindustrial <- preindustrial %>%
+  filter(model != "CCSM4")
+
+smooth.preindustrial$sm.anomaly <- NA
+
+# now go through and get smooth anomalies for each model separately
+mods <- unique(smooth.preindustrial$model)
   
-  ```{r}
-observed.ar.1
-```
-
-So it appears that the simulations were extracted as 60-year blocks, with the autocorrelation intact, and so the 3-yr approach that I use is appropriate.
-
-Now, out of curiosity, I'll calculate the envelope values as the multi-model mean max/min.
-
-Here are the debiased and raw plots using this approach:
-
-```{r,fig.height=3, warnings=F}
-model.means <- envelope %>%
-group_by(model) %>%
-summarize(min.anomaly=fmin(anomaly),
-max.anomaly=fmax(anomaly),
-min.anomaly3=fmin(anomaly.3.yr),
-max.anomaly3=fmax(anomaly.3.yr),
-min.debiased=fmin(debiased),
-max.debiased=fmax(debiased),
-min.debiased3=fmin(debiased.3.yr),
-max.debiased3=fmax(debiased.3.yr))
-
-multi.model.mean <- as.data.frame(t(colMeans(model.means[,-1])))
-
-ggplot(annual, aes(year, anomaly)) +
-theme_bw() +
-geom_line() +
-geom_point() +
-geom_line(aes(year, anomaly3), color=cb[3], size=1) +
-geom_ribbon(aes(ymin=multi.model.mean$min.debiased, ymax=multi.model.mean$max.debiased), alpha=0.2) +
-geom_ribbon(aes(ymin=multi.model.mean$min.debiased3, ymax=multi.model.mean$max.debiased3), alpha=0.2, fill=cb[3]) +
-theme(axis.title.x = element_blank()) +
-ylab("SST anomaly") +
-scale_x_continuous(breaks=seq(1900, 2020, 20), lim=c(1900,2020)) +
-ggtitle("Observations v. debiased envelope (multi-model mean)")
-
-ggplot(annual, aes(year, anomaly)) +
-theme_bw() +
-geom_line() +
-geom_point() +
-geom_line(aes(year, anomaly3), color=cb[3], size=1) +
-geom_ribbon(aes(ymin=multi.model.mean$min.anomaly, ymax=multi.model.mean$max.anomaly), alpha=0.2) +
-geom_ribbon(aes(ymin=multi.model.mean$min.anomaly3, ymax=multi.model.mean$max.anomaly3), alpha=0.2, fill=cb[3]) +
-theme(axis.title.x = element_blank()) +
-ylab("SST anomaly") +
-scale_x_continuous(breaks=seq(1900, 2020, 20), lim=c(1900,2020)) +
-ggtitle("Observations v. raw envelope (multi-model mean)")
-```
-
-Try plotting the range of min/max sst values for each model! 
-
-```{r, warning=F, fig.height=3}
-model.means <- envelope %>%
-group_by(model) %>%
-summarize(min.anomaly=fmin(anomaly),
-max.anomaly=fmax(anomaly),
-min.anomaly3=fmin(anomaly.3.yr),
-max.anomaly3=fmax(anomaly.3.yr),
-min.debiased=fmin(debiased),
-max.debiased=fmax(debiased),
-min.debiased3=fmin(debiased.3.yr),
-max.debiased3=fmax(debiased.3.yr))
-
-plot.model.names <- model.means$model[order(-model.means$max.anomaly)]
-
-model.means <- model.means %>%
-arrange(desc(max.anomaly))
-
-ggplot(annual, aes(year, anomaly)) +
-theme_bw() +
-geom_line() +
-geom_point() +
-geom_line(aes(year, anomaly3), color=cb[3], size=1) +
-geom_hline(yintercept=c(model.means$max.anomaly), alpha=1, lty=2) +
-geom_hline(yintercept=c(model.means$max.anomaly3), alpha=1, lty=2, color=cb[3]) +
-theme(axis.title.x = element_blank()) +
-ylab("SST anomaly") +
-scale_x_continuous(breaks=seq(1900, 2020, 20), lim=c(1900,2020)) +
-ggtitle("Observations v. raw envelope (individual model envelopes)")
-
-# and make a 2-panel version!
-short.list.colors <- cb[c(6,4,2,7,8)]
-
-plot.a <- ggplot(annual, aes(year, anomaly)) +
-theme_bw() +
-geom_hline(yintercept=c(model.means$max.anomaly), color=short.list.colors) +
-geom_line() +
-geom_point() +
-theme(axis.title.x = element_blank()) +
-ylab("SST anomaly") +
-scale_x_continuous(breaks=seq(1900, 2020, 20), lim=c(1900,2020)) +
-ggtitle("a) Annual SST") 
-
-
-for(i in 1:nrow(model.means)){
-plot.a <- plot.a + annotate("text", x=2019, y=-1.5-0.3*i, label=plot.model.names[i], color=short.list.colors[i], adj=1, size=3)
+for(i in 1:length(mods)){
+  
+  temp <- smooth.preindustrial %>%
+    filter(model==mods[i])
+  
+  smooth.preindustrial$sm.anomaly[smooth.preindustrial$model==mods[i]] <- rollmean(temp$anomaly, 3, fill=NA) 
+  
 }
 
-# now drop MRI.CGCM3 as it has unrealistically low AR(1)
-new.means <- model.means[c(1,2,4,5),]
-new.names <- plot.model.names[c(1,2,4,5)]
-new.colors <- short.list.colors[c(1,2,4,5)]
+# now thin so we don't include overlapping windows!
+keepers <- seq(2, 59, 3)
 
-plot.b <- ggplot(annual, aes(year, anomaly3)) +
-theme_bw() +
-geom_hline(yintercept=c(new.means$max.anomaly3), color=new.colors) +
-geom_line() +
-# geom_point() +
-theme(axis.title.x = element_blank()) +
-ylab("SST anomaly") +
-scale_x_continuous(breaks=seq(1900, 2020, 20), lim=c(1900,2020)) +
-ggtitle("b) Three-year running mean SST") 
+smooth.preindustrial <- smooth.preindustrial %>%
+  filter(Year %in% keepers)
 
-for(i in 1:nrow(new.means)){
-plot.b <- plot.b + annotate("text", x=2019, y=-1.5-0.3*i, label=new.names[i], color=new.colors[i], adj=1, size=3)
-}
+sm.obs <- rollmean(annual.anomaly, 3, fill=NA)
 
-png("sst anomalies two-panel.png", 10, 3, units="in", res=300)
-ggpubr::ggarrange(plot.a, plot.b)
+points.sm <- data.frame(labels=c("2014-2016", "2017-2019"), 
+                     anomaly=sm.obs[names(sm.obs) %in% c(2015, 2018)],
+                     density=0)
+
+# and plot individual obs years
+# set palette
+cb <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+a.plot <- ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
+  theme_bw() +
+  geom_col(color="black", size=0.05) +
+  scale_fill_manual(values=cb[7:6]) +
+  theme(legend.position='none', axis.title.x = element_blank()) +
+  ylab("Temperature anomaly") +
+  scale_x_continuous(breaks=seq(1900,2020,20)) +
+  labs(title="a) SST observations")
+  
+nudge.b <- c(0.05, 0.05, 0.05, 0.05, 0.05, 0.15)
+
+# points <- points %>%
+#   arrange(desc(anomaly))
+
+b.plot <- ggplot(preindustrial, aes(anomaly)) +
+  theme_bw() +
+  geom_density(alpha=0.3, color="grey", fill=cb[3]) +
+  xlim(-5,2.5) +
+  geom_point(aes(jitter(anomaly), density), points, fill=cb[8], shape=21, size=1.2) +
+  geom_text(aes(anomaly, density+nudge.b, label=labels), points, size=3.5) +
+  xlab("Temperature anomaly") + ylab("Density") +
+  coord_flip() +
+  ggtitle("b) Annual values")
+
+nudge.c <- 0.09
+
+c.plot <- ggplot(smooth.preindustrial, aes(anomaly)) +
+  theme_bw() +
+  geom_density(alpha=0.3, color="grey", fill=cb[3]) +
+  xlim(-5,2.5) +
+  geom_point(aes(anomaly, density), points.sm, fill=cb[8], shape=21, size=1.2) +
+  geom_text(aes(anomaly, density+nudge.c, label=labels), points.sm, size=3.5) +
+  xlab("Temperature anomaly") + ylab("Density") +
+  coord_flip() +
+  ggtitle("c) 3-year running means")
+
+png("joint sst plots.png", 6, 6, units="in", res=300)
+
+ggarrange(a.plot, 
+          ggarrange(b.plot, c.plot, ncol=2, nrow=1),
+          nrow=2)
+
 dev.off()
-```
 
-Now...look at the % of observations that are outside the preindustrial observations for each model.
+# and calculate likelihood/probability
 
-```{r}
+p.annual <- pnorm(points$anomaly, mean(preindustrial$anomaly), sd(preindustrial$anomaly), lower.tail = F)
+z.annual <- (points$anomaly - mean(preindustrial$anomaly)) / sd(preindustrial$anomaly)
 
-outside.envelope <- matrix(nrow=2, ncol=5)
-dimnames(outside.envelope) <- list(c("annual", "3-yr"), model.means$model)
+p.smooth <- pnorm(points.sm$anomaly, mean(preindustrial$sm.anomaly, na.rm=T),
+                  sd(preindustrial$sm.anomaly, na.rm=T), lower.tail = F)
+z.smooth <- (points.sm$anomaly - mean(preindustrial$sm.anomaly, na.rm = T)) / sd(preindustrial$sm.anomaly, na.rm=T)
 
-for(j in 1:nrow(model.means)){
+# and export
+preind.summary <- data.frame(class=c("annual", "3-yr"),
+                             mean=c(mean(preindustrial$anomaly), mean(preindustrial$sm.anomaly, na.rm = T)),
+                             sd=c(sd(preindustrial$anomaly), sd(preindustrial$sm.anomaly, na.rm = T)),
+                             max=c(max(preindustrial$anomaly), max(preindustrial$sm.anomaly, na.rm = T)))
+write.csv(preind.summary, "preindustrial summary.csv")
 
-outside.envelope[1,j] <- sum(na.omit(annual$anomaly) > model.means$max.anomaly[j])
-outside.envelope[2,j] <- sum(na.omit(annual$anomaly3) > model.means$max.anomaly3[j])
+obs.summary <- data.frame(year=c(2014:2019, "2014-2016", "2017-2019"),
+                          z = c(z.annual, z.smooth),
+                          p = c(p.annual, p.smooth))
 
-}
+obs.summary[,2] <- round(obs.summary[,2], 2)
+obs.summary[,3] <- round(obs.summary[,3], 4)
 
-outside.envelope
-```
+write.csv(obs.summary, "observed summary.csv")
 
