@@ -119,7 +119,7 @@ m <- as.numeric(m)
 keep <- m <= as.numeric(month) # this is the most recent month specified for data query above
 
 short.sst <- SST[keep,]
-short.weighted.mean <- apply(short.sst, 1, ff)
+short.weighted.mean <- apply(short.sst, 1, f)
 
 short.sst <- tapply(short.weighted.mean, yr[keep], mean)
 
@@ -167,18 +167,25 @@ points <- data.frame(labels=c(NA, NA, NA, "2017", "2018", "2014, 2015, 2016, 201
 # and...run the three-year rolling means on preindustrial simulations and plot that distribution
 
 # now...figure out AR(1) values
+# we will use the 1987-2005 historical runs as the comparison period, following Walsh et al. 2018!
+
+# select the subset of historical model outputs for AR comparison
+compare.dat <- dat %>%
+  filter(Era=="historical / RCP8.5", Year %in% 1987:2005)
+
 
 f <- function(x) ar(x, aic=F, order.max = 1)$ar
 
-model.ar.1 <- tapply(preindustrial$anomaly, preindustrial$model, f)
+model.ar.1 <- tapply(compare.dat$anomaly, compare.dat$model, f)
 
-observed.ar.1 <- f(annual.anomaly)
+observed.ar.1 <- f(annual.anomaly[names(annual.anomaly) %in% 1987:2005])
 
 model.ar.1; observed.ar.1
 
-# drop CCSM4 as autocorrelation is unreasonably low!
+# ok, based on this comparison, we will drop MRI.CGCM3 from the comparison with 3-yr mean obs
+
 smooth.preindustrial <- preindustrial %>%
-  filter(model != "CCSM4")
+  filter(model != "MRI.CGCM3")
 
 smooth.preindustrial$sm.anomaly <- NA
 
@@ -218,6 +225,34 @@ a.plot <- ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
   ylab("Temperature anomaly") +
   scale_x_continuous(breaks=seq(1900,2020,20)) +
   labs(title="a) SST observations")
+
+# and save as a one-panel version!
+a.plot <- ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
+  theme_bw() +
+  geom_col(color="black", size=0.05) +
+  scale_fill_manual(values=cb[7:6]) +
+  theme(legend.position='none', axis.title.x = element_blank()) +
+  ylab("Temperature anomaly") +
+  scale_x_continuous(breaks=seq(1900,2020,20)) 
+
+ggsave("one-panel GOA SST 1900-2019.png", width=6, height=3, units="in")
+
+# and now add a map panel...
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(rgeos)
+
+ak <- ne_countries(scale = "medium", returnclass = "sf", continent="north america")
+class(ak)
+
+box <- data.frame(yy=c(50, 60, 60, 50, 50), xx=c(-150, -150, -130, -130, -150))
+
+ggplot(ak) +
+  theme_bw() +
+  geom_sf() + 
+  coord_sf(xlim = c(-165, -125), ylim = c(48, 62), expand = FALSE) +
+  geom_path(aes(xx, yy), box, color=cb[6])
   
 nudge.b <- c(0.05, 0.05, 0.05, 0.05, 0.05, 0.15)
 
@@ -254,20 +289,147 @@ ggarrange(a.plot,
 
 dev.off()
 
-# and calculate likelihood/probability
+# and calculate likelihood/probability compared to each model!
+mods <- unique(preindustrial$model)
+preind.comp.out <- FAR.out <- data.frame()
 
-p.annual <- pnorm(points$anomaly, mean(preindustrial$anomaly), sd(preindustrial$anomaly), lower.tail = F)
-z.annual <- (points$anomaly - mean(preindustrial$anomaly)) / sd(preindustrial$anomaly)
+for(m in 1:length(mods)){
+# m <- 1
+temp <- preindustrial %>%
+  filter(model==mods[m])
 
-p.smooth <- pnorm(points.sm$anomaly, mean(preindustrial$sm.anomaly, na.rm=T),
-                  sd(preindustrial$sm.anomaly, na.rm=T), lower.tail = F)
-z.smooth <- (points.sm$anomaly - mean(preindustrial$sm.anomaly, na.rm = T)) / sd(preindustrial$sm.anomaly, na.rm=T)
+p.annual <- pnorm(points$anomaly, mean(temp$anomaly), sd(temp$anomaly), lower.tail = F)
+#z.annual <- (points$anomaly - mean(preindustrial$anomaly)) / sd(preindustrial$anomaly)
+
+# and FAR
+
+FAR <- obs.prob <- preind.prob <- NA 
+
+for(i in 2014:2019){ # loop through each year to calculate FAR
+  # i <- 2014
+  obs.prob[(i-2013)] <- sum(annual.anomaly[91:120] >= points$anomaly[(i-2013)])/30
+  preind.prob[(i-2013)] <- sum(temp$anomaly >= points$anomaly[(i-2013)])/nrow(temp)
+  FAR[(i-2013)] <- 1-(preind.prob[(i-2013)]/obs.prob[(i-2013)])
+}
+
+  FAR.out <- rbind(FAR.out, 
+                   data.frame(model=mods[m], 
+                              year=2014:2019,
+                              anom=points$anomaly,
+                              obs.prob=obs.prob,
+                              preind.prob=preind.prob,
+                              FAR=FAR))
+
+
+preind.comp.out <- rbind(preind.comp.out,
+                         data.frame(
+                           model=mods[m],
+                           p.2014=p.annual[1],
+                           p.2015=p.annual[2],
+                           p.2016=p.annual[3],
+                           p.2017=p.annual[4],
+                           p.2018=p.annual[5],
+                           p.2019=p.annual[6]
+                         ))
+
+}
+
+FAR.out <- FAR.out %>%
+  arrange(model)
+FAR.out
+
+rownames(preind.comp.out) <- preind.comp.out[,1]
+preind.comp.out <- preind.comp.out[,-1]
+
+preind.comp.out <- as.data.frame(t(preind.comp.out))
+
+rownames(preind.comp.out) <- 1:6
+
+# and put it together for a table in the paper
+FARs <- FAR.out %>%
+  select(model, year, anom, FAR) %>%
+  spread(model, FAR, -year, -anom)
+
+FARs
+
+xport <- cbind(FARs, preind.comp.out)
+write.csv(xport, "annual anomaly preindustrial P values and FAR.csv", row.names = F)
+
+######################################
+# now the statistics for smoothed obs!
+
+mods <- unique(smooth.preindustrial$model)
+preind.comp.out <- FAR.out <- data.frame()
+
+for(m in 1:length(mods)){
+ # m <- 1
+  temp <- smooth.preindustrial %>%
+    filter(model==mods[m])
+  
+  p.annual <- pnorm(points.sm$anomaly, mean(temp$anomaly), sd(temp$anomaly), lower.tail = F)
+  #z.annual <- (points$anomaly - mean(preindustrial$anomaly)) / sd(preindustrial$anomaly)
+  
+  # and FAR
+  
+  FAR <- obs.prob <- preind.prob <- NA 
+  ref <- sm.annual[21:40,3]
+  
+  for(i in 1:2){ # loop through each year to calculate FAR
+    i <- 1
+    obs.prob[i] <- sum(ref >= points.sm$anomaly[i])/20
+    preind.prob[i] <- sum(temp$sm.anomaly >= points.sm$anomaly[i])/nrow(temp)
+    FAR[i] <- 1-(preind.prob[i]/obs.prob[i])
+  }
+  
+  FAR.out <- rbind(FAR.out, 
+                   data.frame(model=mods[m], 
+                              year=c("2014-2016", "2017-2019"),
+                              anom=points.sm$anomaly,
+                              obs.prob=obs.prob,
+                              preind.prob=preind.prob,
+                              FAR=FAR))
+  
+  preind.comp.out <- rbind(preind.comp.out,
+                           data.frame(
+                             model=mods[m],
+                             p.2014.2016=p.annual[1],
+                             p.2017.2019=p.annual[2]
+                           ))
+  
+}
+
+FAR.out <- FAR.out %>%
+  arrange(model)
+FAR.out
+
+rownames(preind.comp.out) <- preind.comp.out[,1]
+preind.comp.out <- preind.comp.out[,-1]
+
+preind.comp.out <- as.data.frame(t(preind.comp.out))
+
+rownames(preind.comp.out) <- 1:2
+
+# and put it together for a table in the paper
+FARs <- FAR.out %>%
+  select(model, year, anom, FAR) %>%
+  spread(model, FAR, -year, -anom)
+
+FARs
+
+xport <- cbind(FARs, preind.comp.out)
+write.csv(xport, "smoothed anomaly preindustrial P values and FAR.csv", row.names = F)
+
+##############################################
+# old stuff below!
+p.smooth <- pnorm(points.sm$anomaly, mean(smooth.preindustrial$sm.anomaly, na.rm=T),
+                  sd(smooth.preindustrial$sm.anomaly, na.rm=T), lower.tail = F)
+z.smooth <- (points.sm$anomaly - mean(smooth.preindustrial$sm.anomaly, na.rm = T)) / sd(smooth.preindustrial$sm.anomaly, na.rm=T)
 
 # and export
 preind.summary <- data.frame(class=c("annual", "3-yr"),
-                             mean=c(mean(preindustrial$anomaly), mean(preindustrial$sm.anomaly, na.rm = T)),
-                             sd=c(sd(preindustrial$anomaly), sd(preindustrial$sm.anomaly, na.rm = T)),
-                             max=c(max(preindustrial$anomaly), max(preindustrial$sm.anomaly, na.rm = T)))
+                             mean=c(mean(smooth.preindustrial$anomaly), mean(smooth.preindustrial$sm.anomaly, na.rm = T)),
+                             sd=c(sd(smooth.preindustrial$anomaly), sd(smooth.preindustrial$sm.anomaly, na.rm = T)),
+                             max=c(max(smooth.preindustrial$anomaly), max(smooth.preindustrial$sm.anomaly, na.rm = T)))
 write.csv(preind.summary, "preindustrial summary.csv")
 
 obs.summary <- data.frame(year=c(2014:2019, "2014-2016", "2017-2019"),
@@ -279,3 +441,89 @@ obs.summary[,3] <- round(obs.summary[,3], 4)
 
 write.csv(obs.summary, "observed summary.csv")
 
+# and calculate fraction of attributable risk
+
+# start with annual FAR
+obs.probability <- preind.probability <- NA
+ref <- annual.anomaly[91:120]
+
+for(i in 2014:2019){
+
+  # i <- 2014
+  obs.probability[(i-2013)] <- sum(ref >= annual.anomaly[names(annual.anomaly)==i])/30
+  preind.probability[(i-2013)] <- sum(preindustrial$anomaly >= annual.anomaly[names(annual.anomaly)==i])/nrow(preindustrial)
+}
+
+annual.FAR <- 1-(preind.probability/obs.probability)
+
+# now 3-yr running mean FAR
+keeper.years <- seq(2018, 1990, -3)
+obs.prob.sm <- preind.prob.sm <- NA
+ref <- sm.obs[names(sm.obs) %in% keeper.years]
+
+counter <- c(2015, 2018)
+
+for(i in 1:2){
+  
+  # i <- 2014
+  obs.prob.sm[i] <- sum(ref >= sm.obs[names(sm.obs)==counter[i]])/length(ref)
+  preind.prob.sm[i] <- sum(smooth.preindustrial$anomaly >= annual.anomaly[names(annual.anomaly)==counter[i]])/nrow(smooth.preindustrial)
+}
+
+smooth.FAR <- 1-(preind.prob.sm/obs.prob.sm)
+
+# now a SI plot
+# and make a 2-panel version!
+short.list.colors <- cb[c(6,4,2,7,8)]
+
+annual <- data.frame(year=as.numeric(as.character(names(annual.anomaly))), anomaly=annual.anomaly)
+
+sm.keep <- seq(2018, 1900, -3)
+
+sm.keep <- sm.obs[names(sm.obs) %in% sm.keep]
+
+annual$anomaly3 <- sm.keep[match(annual$year, names(sm.keep))]
+
+model.means <- preindustrial %>%
+  group_by(model) %>%
+  summarise(max.anomaly=max(anomaly))
+
+sm.model <- smooth.preindustrial %>%
+  group_by(model) %>%
+  summarize(max.anomaly3=max(sm.anomaly)) %>%
+  filter(model != "CCSM4") # drop the model with unrealistic AR(1) values
+
+plot.a <- ggplot(annual, aes(year, anomaly)) +
+  theme_bw() +
+  geom_hline(yintercept=c(model.means$max.anomaly), color=short.list.colors) +
+  geom_line() +
+  geom_point() +
+  theme(axis.title.x = element_blank()) +
+  ylab("SST anomaly") +
+  scale_x_continuous(breaks=seq(1900, 2020, 20), lim=c(1900,2020)) +
+  ggtitle("a) Annual SST") 
+
+
+for(i in 1:nrow(model.means)){
+  plot.a <- plot.a + annotate("text", x=2019, y=-1.5-0.3*i, label=model.means$model[i], color=short.list.colors[i], adj=1, size=3)
+}
+
+sm.annual <- na.omit(annual)
+  
+plot.b <- ggplot(sm.annual, aes(year, anomaly3)) +
+  theme_bw() +
+  geom_hline(yintercept=c(sm.model$max.anomaly3), color=short.list.colors[2:5]) +
+  geom_line() +
+  geom_point() +
+  theme(axis.title.x = element_blank()) +
+  ylab("SST anomaly") +
+  scale_x_continuous(breaks=seq(1900, 2020, 20), lim=c(1900,2020)) +
+  ggtitle("b) Three-year running mean SST") 
+
+for(i in 1:nrow(sm.model)){
+  plot.b <- plot.b + annotate("text", x=2019, y=-1.5-0.3*i, label=sm.model$model[i], color=short.list.colors[(i+1)], adj=1, size=3)
+}
+
+png("sst anomalies two-panel.png", 10, 3, units="in", res=300)
+ggpubr::ggarrange(plot.a, plot.b)
+dev.off()
