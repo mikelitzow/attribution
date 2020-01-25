@@ -25,10 +25,40 @@ dat$Era <- ifelse(dat$Era=="present",
 
 dat$Era <- reorder(dat$Era, desc(dat$Era))
 
-ggplot(dat, aes(Year, anomaly, color=model)) +
+mean.dat <- dat %>%
+  filter(Era=="historical / RCP8.5") %>%
+  group_by(Year) %>%
+  summarize(model.mean=mean(anomaly))
+
+
+plot.dat <- dat %>%
+  filter(Era=="historical / RCP8.5") %>%
+  select(Year, model, anomaly)
+  
+plot.dat$type <- "Individual models"
+
+names(mean.dat)[2] <- "anomaly"
+mean.dat$model <- "Ensemble mean"
+mean.dat$type <- "Ensemble mean"
+
+mean.dat <- mean.dat %>%
+  select(Year, model, anomaly, type)
+
+plot.dat <- rbind(plot.dat, mean.dat)
+plot.dat$model <- as.factor(plot.dat$model)
+
+
+ggplot(filter(plot.dat, type=="Individual models"), aes(Year, anomaly, color=model)) +
   theme_bw() +
-  geom_line() + 
-  facet_wrap(~Era, scales="free_x")
+  geom_line() +
+  scale_color_grey() +
+  geom_line(aes(Year, anomaly, color=model), filter(plot.dat, type=="Ensemble mean"), color="red", size=0.8) +
+  theme(legend.position = 'none', axis.title.x = element_blank()) +
+  ylab("Anomaly") +
+  annotate("text", x=2002, y=3.6,label= "Ensemble member", color="dark grey") +
+  annotate("text", x=1999.7, y=3.2,label= "Ensemble mean", color="red")
+
+ggsave("CMIP5 sst anomaly projections.png", width=3, height=3, units='in')
 
 preindustrial <- dat %>%
   filter(Era=="preindustrial")
