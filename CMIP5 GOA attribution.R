@@ -16,6 +16,7 @@ library(ggpubr)
 # load
 
 dat <- read.csv("CMIP5 GOA SST.csv")
+names(dat)[1] <- "Year"
 
 dat <- dat %>%
   gather(model, anomaly, -Year, -Era)
@@ -40,17 +41,18 @@ ggplot(preindustrial, aes(anomaly, fill=model)) +
 
 # We will compare the preindustrial estimates above with ERSSTv5 observations. The observations are for the same area (50º-60ºN, 150º-130ºW). Here is average SST for that area from ERSSTv5:
 
-# quickly (!) estimate 2019 annual anomaly based on data avaliable so far!
+# quickly (!) estimate 2020 annual anomaly based on data avaliable so far!
 # identify latest year and month needed
-year <- 2019
-month <- "11"
+year <- 2020
+month <- "10"
 
-URL <- paste("https://coastwatch.pfeg.noaa.gov/erddap/griddap/nceiErsstv5.nc?sst[(1854-01-01):1:(", year, "-", month, "-01T00:00:00Z)][(0.0):1:(0.0)][(50):1:(60)][(210):1:(230)]", sep="")
-
-download.file(URL, "GOA.box.ersst.latest")
+# URL <- paste("https://coastwatch.pfeg.noaa.gov/erddap/griddap/nceiErsstv5.nc?sst[(1854-01-01):1:(", year, "-", month, "-01T00:00:00Z)][(0.0):1:(0.0)][(50):1:(60)][(210):1:(230)]", sep="")
+# 
+# download.file(URL, "GOA.box.ersst.latest")
 
 # process
-nc <- nc_open("GOA.box.ersst.latest")
+# nc <- nc_open("GOA.box.ersst.latest")
+nc <- nc_open("nceiErsstv5_3a8e_bf19_ba95.nc")
 
 # extract dates
 raw <- ncvar_get(nc, "time")
@@ -113,7 +115,7 @@ anomaly.plot <- data.frame(year=1900:2018, anomaly=annual.anomaly[names(annual.a
 anomaly.plot$sign <- reorder(anomaly.plot$sign, desc(anomaly.plot$sign))
 
 ##################
-# now estimate 2019 value
+# now estimate 2020 value
 # limit all years to the range of months available in this year!
 m <- as.numeric(m)
 keep <- m <= as.numeric(month) # this is the most recent month specified for data query above
@@ -123,19 +125,19 @@ short.weighted.mean <- apply(short.sst, 1, f)
 
 short.sst <- tapply(short.weighted.mean, yr[keep], mean)
 
-x <- as.vector(short.sst[names(short.sst) %in% 1900:2018])
-y <- annual.anomaly[names(annual.anomaly) %in% 1900:2018]
+x <- as.vector(short.sst[names(short.sst) %in% 1900:2019])
+y <- annual.anomaly[names(annual.anomaly) %in% 1900:2019]
 
-plot(1900:2018, scale(x), col="blue", type="l")
-lines(1900:2018, scale(y), col='red')
+plot(1900:2019, scale(x), col="blue", type="l")
+lines(1900:2019, scale(y), col='red')
 
 md1 <- lm(y ~ x)
 
-# now add 2019 estimate to the annual TS
-estimated.2019 <- short.sst[names(short.sst)==2019]*coef(md1)[2] + coef(md1)[1]
-annual.anomaly[names(annual.anomaly)==2019] <- estimated.2019
+# now add 2020 estimate to the annual TS
+estimated.2020 <- short.sst[names(short.sst)==2020]*coef(md1)[2] + coef(md1)[1]
+annual.anomaly[names(annual.anomaly)==2020] <- estimated.2020
 
-anomaly.plot <- data.frame(year=1900:2019, anomaly=annual.anomaly,
+anomaly.plot <- data.frame(year=1900:2020, anomaly=annual.anomaly,
                            sign=as.vector(ifelse(annual.anomaly>0, "positive", "negative")),
                            sm.anom=rollmean(annual.anomaly, 3, fill = NA))
 
@@ -149,10 +151,10 @@ ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
 
 # Now going ahead with the comparison to preindustrial simulations
 preind.obs <- rbind(preindustrial,
-                    data.frame(Year=2014:2019, 
+                    data.frame(Year=2014:2020, 
                                Era="observation",
                                model=NA, 
-                               anomaly=annual.anomaly[names(annual.anomaly) %in% 2014:2019]))
+                               anomaly=annual.anomaly[names(annual.anomaly) %in% 2014:2020]))
 
 # plot preindustrial distributions with recent
 ggplot(preind.obs, aes(anomaly, fill=Era)) +
@@ -324,6 +326,8 @@ temp <- preindustrial %>%
 # and FAR
 
 FAR <- obs.prob <- preind.prob <- NA 
+
+# and a new 'points' df without smoothed data and including 2020
 
 for(i in 2014:2019){ # loop through each year to calculate FAR
   # i <- 2014
