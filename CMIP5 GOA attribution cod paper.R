@@ -326,17 +326,21 @@ temp <- preindustrial %>%
 # and FAR
 
 FAR <- obs.prob <- preind.prob <- NA 
+# make a new 'points' object for 2006-2020 (the years of cod sampling!)
+points <- data.frame(anomaly=annual.anomaly[names(annual.anomaly) %in% 1960:2020])
 
-for(i in 2014:2019){ # loop through each year to calculate FAR
+
+
+for(i in 1960:2020){ # loop through each year to calculate FAR
   # i <- 2014
-  obs.prob[(i-2013)] <- sum(annual.anomaly[61:120] >= points$anomaly[(i-2013)])/60
-  preind.prob[(i-2013)] <- sum(temp$anomaly >= points$anomaly[(i-2013)])/nrow(temp)
-  FAR[(i-2013)] <- 1-(preind.prob[(i-2013)]/obs.prob[(i-2013)])
+  obs.prob[(i-1959)] <- sum(annual.anomaly[61:120] >= points$anomaly[(i-1959)])/60
+  preind.prob[(i-1959)] <- sum(temp$anomaly >= points$anomaly[(i-1959)])/nrow(temp)
+  FAR[(i-1959)] <- 1-(preind.prob[(i-1959)]/obs.prob[(i-1959)])
 }
 
   FAR.out <- rbind(FAR.out, 
                    data.frame(model=mods[m], 
-                              year=2014:2019,
+                              year=1960:2020,
                               anom=points$anomaly,
                               obs.prob=obs.prob,
                               preind.prob=preind.prob,
@@ -359,6 +363,23 @@ for(i in 2014:2019){ # loop through each year to calculate FAR
 FAR.out <- FAR.out %>%
   arrange(model)
 FAR.out
+
+# and collapse into a ts to plot
+plot.dat <- FAR.out %>%
+  group_by(year) %>%
+  summarise(anom=mean(anom),
+            observational_prob=mean(obs.prob),
+            preindustrial_prob=mean(preind.prob),
+            Fration_Attributable_Risk=mean(FAR)) %>%
+  pivot_longer(cols=-year)
+
+
+ggplot(plot.dat, aes(year, value)) +
+  geom_line() +
+  facet_wrap(~name, scales="free_y")
+
+# and export
+write.csv(FAR.out, "FAR values for cod paper.csv")
 
 rownames(preind.comp.out) <- preind.comp.out[,1]
 preind.comp.out <- preind.comp.out[,-1]
