@@ -16,7 +16,7 @@ library(ggpubr)
 # load
 
 dat <- read.csv("CMIP5 GOA SST.csv")
-
+names(dat)[1] <- "Year"
 dat <- dat %>%
   gather(model, anomaly, -Year, -Era)
 
@@ -76,7 +76,7 @@ year <- 2019
 month <- "11"
 
 URL <- paste("https://coastwatch.pfeg.noaa.gov/erddap/griddap/nceiErsstv5.nc?sst[(1854-01-01):1:(", year, "-", month, "-01T00:00:00Z)][(0.0):1:(0.0)][(50):1:(60)][(210):1:(230)]", sep="")
-
+==
 download.file(URL, "GOA.box.ersst.latest")
 
 # process
