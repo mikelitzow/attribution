@@ -149,6 +149,9 @@ ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
   geom_line(aes(year, sm.anom, group=1)) +
   theme(legend.position='none')
 
+# save for cod paper!
+write.csv(anomaly.plot, "GOA ERSST anomalies matching Walsh et al area.csv", row.names = F)
+
 # Now going ahead with the comparison to preindustrial simulations
 preind.obs <- rbind(preindustrial,
                     data.frame(Year=2014:2020, 
