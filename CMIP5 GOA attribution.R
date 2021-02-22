@@ -154,10 +154,10 @@ write.csv(anomaly.plot, "GOA ERSST anomalies matching Walsh et al area.csv", row
 
 # Now going ahead with the comparison to preindustrial simulations
 preind.obs <- rbind(preindustrial,
-                    data.frame(Year=2014:2020, 
+                    data.frame(Year=1900:2020, 
                                Era="observation",
                                model=NA, 
-                               anomaly=annual.anomaly[names(annual.anomaly) %in% 2014:2020]))
+                               anomaly=annual.anomaly[names(annual.anomaly) %in% 1900:2020]))
 
 # plot preindustrial distributions with recent
 ggplot(preind.obs, aes(anomaly, fill=Era)) +

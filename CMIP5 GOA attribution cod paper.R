@@ -151,10 +151,10 @@ ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
 
 # Now going ahead with the comparison to preindustrial simulations
 preind.obs <- rbind(preindustrial,
-                    data.frame(Year=2014:2020, 
+                    data.frame(Year=1900:2020, 
                                Era="observation",
                                model=NA, 
-                               anomaly=annual.anomaly[names(annual.anomaly) %in% 2014:2020]))
+                               anomaly=annual.anomaly[names(annual.anomaly) %in% 1900:2020]))
 
 # plot preindustrial distributions with recent
 ggplot(preind.obs, aes(anomaly, fill=Era)) +
@@ -162,154 +162,6 @@ theme_bw() +
   geom_density(alpha=0.3, color="grey") +
   xlim(-5,5) 
 
-points <- data.frame(labels=c(NA, NA, NA, "2017", "2018", "2014, 2015, 2016, 2019"), 
-                     anomaly=annual.anomaly[names(annual.anomaly) %in% 2014:2019],
-                     density=0)
-
-# and...run the three-year rolling means on preindustrial simulations and plot that distribution
-
-# now...figure out AR(1) values
-# we will use the 1987-2005 historical runs as the comparison period, following Walsh et al. 2018!
-
-# select the subset of historical model outputs for AR comparison
-compare.dat <- dat %>%
-  filter(Era=="historical / RCP8.5", Year %in% 1987:2005)
-
-
-f <- function(x) ar(x, aic=F, order.max = 1)$ar
-
-model.ar.1 <- tapply(compare.dat$anomaly, compare.dat$model, f)
-
-observed.ar.1 <- f(annual.anomaly[names(annual.anomaly) %in% 1987:2005])
-
-model.ar.1; observed.ar.1
-
-# ok, based on this comparison, we will drop MRI.CGCM3 from the comparison with 3-yr mean obs
-
-smooth.preindustrial <- preindustrial %>%
-  filter(model != "MRI.CGCM3")
-
-smooth.preindustrial$sm.anomaly <- NA
-
-# now go through and get smooth anomalies for each model separately
-mods <- unique(smooth.preindustrial$model)
-  
-for(i in 1:length(mods)){
-  
-  temp <- smooth.preindustrial %>%
-    filter(model==mods[i])
-  
-  smooth.preindustrial$sm.anomaly[smooth.preindustrial$model==mods[i]] <- rollmean(temp$anomaly, 3, fill=NA) 
-  
-}
-
-# now thin so we don't include overlapping windows!
-keepers <- seq(2, 59, 3)
-
-smooth.preindustrial <- smooth.preindustrial %>%
-  filter(Year %in% keepers)
-
-sm.obs <- rollmean(annual.anomaly, 3, fill=NA)
-
-points.sm <- data.frame(labels=c("2014-2016", "2017-2019"), 
-                     anomaly=sm.obs[names(sm.obs) %in% c(2015, 2018)],
-                     density=0)
-
-# and plot individual obs years
-# set palette
-cb <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
-
-a.plot <- ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
-  theme_bw() +
-  geom_col(color="black", size=0.05) +
-  scale_fill_manual(values=cb[7:6]) +
-  theme(legend.position='none', axis.title.x = element_blank()) +
-  ylab("Temperature anomaly") +
-  scale_x_continuous(breaks=seq(1900,2020,20)) +
-  labs(title="a) SST observations")
-
-# and save as a one-panel version!
-a.plot <- ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
-  theme_bw() +
-  geom_col(color="black", size=0.05) +
-  geom_line(aes(year, sm.anom, group=1)) +
-  scale_fill_manual(values=cb[7:6]) +
-  theme(legend.position='none', axis.title.x = element_blank()) +
-  ylab("Temperature anomaly") +
-  scale_x_continuous(breaks=seq(1900,2020,20)) 
-
-ggplot(anomaly.plot, aes(year, anomaly, fill=sign)) +
-  theme_bw() +
-  geom_col() +
-  geom_line(aes(year, sm.anom, group=1)) +
-  theme(legend.position='none')
-
-ggsave("one-panel GOA SST 1900-2019.png", width=6, height=3, units="in")
-
-# and now add a map panel...
-library(sf)
-library(rnaturalearth)
-library(rnaturalearthdata)
-library(rgeos)
-
-ak <- ne_countries(scale = "medium", returnclass = "sf", continent="north america")
-class(ak)
-
-box <- data.frame(yy=c(50, 60, 60, 50, 50), xx=c(-150, -150, -130, -130, -150))
-
-map.plot <- ggplot(ak) +
-  theme_bw() +
-  geom_sf(fill="darkgoldenrod3", color=NA) + 
-  coord_sf(xlim = c(-162, -123), ylim = c(45, 63), expand = FALSE) +
-  geom_path(aes(xx, yy), box, color=cb[6]) +
-  theme(axis.title = element_blank()) +
-  scale_x_continuous(breaks = seq(-160,-130, 10))
-  
-plot.null <- ggplot() + theme_void()
-
-png("anomaly and map plot.png", 7,2.5, units='in', res=300)
-
-ggpubr::ggarrange(
-ggpubr::ggarrange(map.plot, plot.null, ncol=1, nrow=2, heights=c(0.8, 0.2)),
-                  a.plot, ncol=2, widths=c(0.4, 1), labels = c("a)", "b)"), align="h")
-
-dev.off()
-
-
-nudge.b <- c(0.05, 0.05, 0.05, 0.05, 0.05, 0.15)
-
-# points <- points %>%
-#   arrange(desc(anomaly))
-
-b.plot <- ggplot(preindustrial, aes(anomaly)) +
-  theme_bw() +
-  geom_density(alpha=0.3, color="grey", fill=cb[3]) +
-  xlim(-5,2.5) +
-  geom_point(aes(jitter(anomaly), density), points, fill=cb[8], shape=21, size=1.2) +
-  geom_text(aes(anomaly, density+nudge.b, label=labels), points, size=3.5) +
-  xlab("Temperature anomaly") + ylab("Density") +
-  coord_flip() +
-  ggtitle("b) Annual values")
-
-nudge.c <- 0.09
-
-c.plot <- ggplot(smooth.preindustrial, aes(anomaly)) +
-  theme_bw() +
-  geom_density(alpha=0.3, color="grey", fill=cb[3]) +
-  xlim(-5,2.5) +
-  geom_point(aes(anomaly, density), points.sm, fill=cb[8], shape=21, size=1.2) +
-  geom_text(aes(anomaly, density+nudge.c, label=labels), points.sm, size=3.5) +
-  xlab("Temperature anomaly") + ylab("Density") +
-  coord_flip() +
-  ggtitle("c) 3-year running means")
-
-png("joint sst plots.png", 6, 6, units="in", res=300)
-
-ggarrange(a.plot, 
-          ggarrange(b.plot, c.plot, ncol=2, nrow=1),
-          nrow=2)
-
-dev.off()
 
 # and calculate likelihood/probability compared to each model!
 mods <- unique(preindustrial$model)
@@ -326,7 +178,7 @@ temp <- preindustrial %>%
 # and FAR
 
 FAR <- obs.prob <- preind.prob <- NA 
-# make a new 'points' object for 2006-2020 (the years of cod sampling!)
+# make a new 'points' object for 1900-2020
 points <- data.frame(anomaly=annual.anomaly[names(annual.anomaly) %in% 1960:2020])
 
 
@@ -346,18 +198,6 @@ for(i in 1960:2020){ # loop through each year to calculate FAR
                               preind.prob=preind.prob,
                               FAR=FAR))
 
-
-# preind.comp.out <- rbind(preind.comp.out,
-#                          data.frame(
-#                            model=mods[m],
-#                            p.2014=p.annual[1],
-#                            p.2015=p.annual[2],
-#                            p.2016=p.annual[3],
-#                            p.2017=p.annual[4],
-#                            p.2018=p.annual[5],
-#                            p.2019=p.annual[6]
-                         # ))
-
 }
 
 FAR.out <- FAR.out %>%
@@ -370,7 +210,7 @@ plot.dat <- FAR.out %>%
   summarise(anom=mean(anom),
             observational_prob=mean(obs.prob),
             preindustrial_prob=mean(preind.prob),
-            Fration_Attributable_Risk=mean(FAR)) %>%
+            Fraction_Attributable_Risk=mean(FAR)) %>%
   pivot_longer(cols=-year)
 
 
@@ -380,6 +220,118 @@ ggplot(plot.dat, aes(year, value)) +
 
 # and export
 write.csv(FAR.out, "FAR values for cod paper.csv")
+
+## Now calculate FAR values for historical / RCP8.5 runs!
+
+dat <- read.csv("CMIP5 GOA SST.csv")
+names(dat)[1] <- "Year"
+
+dat <- dat %>%
+  filter(Era=="present") %>% # present is historical / RCP8.5!
+  select(-Era) %>%
+  pivot_longer(cols = -Year)
+  
+ggplot(dat, aes(Year, value, color=name)) +
+  theme_bw() +
+  geom_line() 
+
+## now calculate FAR for these values!
+# and calculate likelihood/probability compared to each model!
+mods <- unique(preindustrial$model)
+preind.comp.out <- FAR_8.5_out <- data.frame()
+
+for(m in 1:length(mods)){
+  # m <- 1
+  temp.pre <- preindustrial %>%
+    filter(model==mods[m])
+
+  temp_8.5 <- dat %>%
+    filter(name==mods[m])
+  
+  # and FAR
+  
+  FAR_8.5 <- prob_8.5 <- preind.prob <- NA 
+ 
+  for(i in 1987:2046){ # loop through each year to calculate FAR
+    # i <- 2014
+    prob_8.5[(i-1986)] <- sum(temp_8.5$value >= temp_8.5$value[(i-1986)])/60
+    preind.prob[(i-1986)] <- sum(temp.pre$anomaly >= temp_8.5$value[(i-1986)])/60
+    FAR_8.5[(i-1986)] <- 1-(preind.prob[(i-1986)]/prob_8.5[(i-1986)])
+  }
+  
+  FAR_8.5_out <- rbind(FAR_8.5_out, 
+                   data.frame(model=mods[m], 
+                              year=1987:2046,
+                              FAR=FAR_8.5))
+  
+}
+
+## now combine 
+FAR.obs <- FAR.out %>%
+  group_by(year) %>%
+  summarise(FAR=mean(FAR))
+
+write.csv(FAR.out, "ERSST FAR.csv")
+
+FAR.obs$source <- "observed"
+
+names(FAR_8.5_out)[1] <- "source"
+
+FAR_8.5_out <- FAR_8.5_out %>%
+  select(year, FAR, source)
+
+
+write.csv(FAR_8.5_out, "CMIP FAR.csv")
+
+FAR.plot <- rbind(FAR.obs, FAR_8.5_out)
+
+ggplot(FAR.plot, aes(year, FAR, color=source)) +
+  geom_line()
+
+
+# get model / obs FAR spread!
+
+FAR_8.5_mean <- FAR_8.5_out %>%
+  group_by(year) %>%
+  summarise(FARmu = mean(FAR), FARsd = sd(FAR))
+
+FAR_obs_mean <- FAR.out %>%
+  group_by(year) %>%
+  summarise(FARmu = mean(FAR), FARsd = sd(FAR))
+
+FAR_obs_mean$source <- "Observed (ERSST)"
+
+FAR_8.5_mean$source <- "Modeled (historical / RCP8.5)"
+
+FAR.plot <- rbind(FAR_obs_mean, FAR_8.5_mean)
+
+FAR.plot$source <- reorder(FAR.plot$source, desc(FAR.plot$source))
+
+FAR.plot$ymin <- FAR.plot$FARmu-1.96*FAR.plot$FARsd/sqrt(5)
+FAR.plot$ymax <- FAR.plot$FARmu+1.96*FAR.plot$FARsd/sqrt(5)
+
+FAR.plot$ymin <- ifelse(FAR.plot$ymin < 0, 0, FAR.plot$ymin)
+FAR.plot$ymax <- ifelse(FAR.plot$ymax > 1, 1, FAR.plot$ymax)
+
+ggplot(FAR.plot, aes(year, FARmu)) +
+  geom_line(color="red") +
+  geom_ribbon(aes(ymin=ymin, ymax=ymax), alpha=0.3, linetype=0) +
+  facet_wrap(~source, ncol=1) +
+  theme_bw() +
+  xlim(1960, 2048) +
+  geom_hline(yintercept = 0.9, lty=2) +
+  theme(axis.title.x = element_blank()) +
+  ylab("Fraction Attributable Risk") +
+  scale_x_continuous(breaks=seq(1960, 2040, 10))
+
+ggsave("observed and modeled FAR.png", width=5, height=4, units='in')
+
+
+
+
+
+## old stuff below!
+
 
 rownames(preind.comp.out) <- preind.comp.out[,1]
 preind.comp.out <- preind.comp.out[,-1]
